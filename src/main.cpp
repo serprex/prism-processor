@@ -23,12 +23,13 @@ enum {
     SHADER_NOISE
 };
 
-extern "C" prism::ContextTypes* add_text(prism::ContextItems* _, prism::ContextTypes* arg1, prism::ContextTypes* arg2, prism::ContextTypes* arg3) {
+prism::ContextTypes add_text(prism::ContextItems& _, const prism::ContextTypes& arg1, const prism::ContextTypes& arg2,
+                             const prism::ContextTypes& arg3) {
     std::string items = "";
     for (int i = 0; i < 3; i++) {
         items += "add";
     }
-    return new prism::ContextTypes{ items };
+    return prism::ContextTypes{ items };
 }
 
 #define RAND_NOISE "((random(vec3(floor(gl_FragCoord.xy * noise_scale), float(frame_count))) + 1.0) / 2.0)"
@@ -108,25 +109,26 @@ static const char* shader_item_to_str(uint32_t item, bool with_alpha, bool only_
     return "";
 }
 
-bool get_bool(prism::ContextTypes* value) {
-    if (std::holds_alternative<int>(*value)) {
-        return std::get<int>(*value) == 1;
+bool get_bool(const prism::ContextTypes& value) {
+    if (std::holds_alternative<int>(value)) {
+        return std::get<int>(value) == 1;
     }
     return false;
 }
 
-extern "C" prism::ContextTypes* append_formula(prism::ContextItems* items, prism::ContextTypes* a_arg, prism::ContextTypes* a_single,
-                                    prism::ContextTypes* a_mult, prism::ContextTypes* a_mix,
-                                    prism::ContextTypes* a_with_alpha, prism::ContextTypes* a_only_alpha,
-                                    prism::ContextTypes* a_alpha, prism::ContextTypes* a_first_cycle) {
-    if (!items->contains("local_var")) {
-        items->insert({"local_var", prism::ContextTypes{0}});
+prism::ContextTypes append_formula(prism::ContextItems& items, const prism::ContextTypes& a_arg,
+                                   const prism::ContextTypes& a_single, const prism::ContextTypes& a_mult,
+                                   const prism::ContextTypes& a_mix, const prism::ContextTypes& a_with_alpha,
+                                   const prism::ContextTypes& a_only_alpha, const prism::ContextTypes& a_alpha,
+                                   const prism::ContextTypes& a_first_cycle) {
+    if (!items.contains("local_var")) {
+        items.insert({"local_var", prism::ContextTypes{0}});
     }
     // increase local_var by 1
-    auto& local_var = std::get<int>(items->at("local_var"));
+    auto& local_var = std::get<int>(items.at("local_var"));
     local_var++;
     // uint8_t c[2][4] =
-    auto c = std::get<prism::MTDArray<int>>(*a_arg);
+    auto c = std::get<prism::MTDArray<int>>(a_arg);
     bool do_single = get_bool(a_single);
     bool do_multiply = get_bool(a_mult);
     bool do_mix = get_bool(a_mix);
@@ -159,7 +161,7 @@ extern "C" prism::ContextTypes* append_formula(prism::ContextItems* items, prism
         out += " + ";
         out += shader_item_to_str(c.at(only_alpha, 3), with_alpha, only_alpha, opt_alpha, first_cycle, false);
     }
-    return new prism::ContextTypes{ out };
+    return prism::ContextTypes{ out };
 }
 
 std::optional<std::string> include_fs(const std::string& path){
@@ -280,7 +282,7 @@ int main(int argc, char** argv) {
         { "vOutColor", "gl_Position" },
         { "o_current_filter", 0 },
         { "o_c", M_ARRAY(o_c, int, 2, 2, 4) },
-        { "add_text", (InvokeFunc) add_text },
+        { "add_text", prism::InvokeFunc(add_text) },
         { "o_color_alpha_same", M_ARRAY(o_color_alpha_same, int, 3) },
         { "FILTER_THREE_POINT", 3 },
         { "SHADER_0", SHADER_0 },
@@ -298,7 +300,7 @@ int main(int argc, char** argv) {
         { "SHADER_1", SHADER_1 },
         { "SHADER_COMBINED", SHADER_COMBINED },
         { "SHADER_NOISE", SHADER_NOISE },
-        { "append_formula", (InvokeFunc) append_formula },
+        { "append_formula", prism::InvokeFunc(append_formula) },
         { "o_do_single", M_ARRAY(o_do_single, int, 2, 2) },
         { "o_do_multiply", M_ARRAY(o_do_multiply, int, 2, 2) },
         { "o_do_mix", M_ARRAY(o_do_mix, int, 2, 2) },

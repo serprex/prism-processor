@@ -8,10 +8,13 @@
 #include <optional>
 #include <unordered_map>
 #include <cstdlib>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <type_traits>
 
 #include "lexer.h"
 #include "ast.h"
-#include "utils/invoke.h"
 #include "utils/exceptions.h"
 
 #define is_type(var, type) std::holds_alternative<type>((var))
@@ -126,10 +129,84 @@ struct Opaque {
     uintptr_t ptr;
 };
 
+// Holds the std::function a native callback was adapted to.
+struct InvokeCallable;
+
+// Handle for a native function callable from a template.
+class InvokeFunc {
+  public:
+    InvokeFunc() = default;
+
+    // Accepts either a callable with the erased signature
+    //   ContextTypes(ContextItems&, const std::vector<ContextTypes>&),
+    // or a plain function pointer
+    //   ContextTypes(*)(ContextItems&, const ContextTypes&, ...)
+    // whose arguments are unpacked for it and checked for arity.
+    // Explicit so std::variant does not consider it when converting other types.
+    template <typename F, typename = std::enable_if_t<!std::is_same_v<std::decay_t<F>, InvokeFunc>>>
+    explicit InvokeFunc(F func);
+
+    explicit operator bool() const {
+        return m_impl != nullptr;
+    }
+
+    const std::shared_ptr<InvokeCallable>& target() const {
+        return m_impl;
+    }
+
+  private:
+    std::shared_ptr<InvokeCallable> m_impl;
+};
+
 typedef std::variant<Void, int, float, MTDArray<bool>, MTDArray<int>, MTDArray<float>, GeneratedRange,
                      std::string, ForContext, InvokeFunc, Opaque>
     ContextTypes;
 typedef std::unordered_map<std::string, ContextTypes> ContextItems;
+
+struct InvokeCallable {
+    std::function<ContextTypes(ContextItems&, const std::vector<ContextTypes>&)> func;
+};
+
+namespace detail {
+template <typename F> struct MakeCallable {
+    static std::shared_ptr<InvokeCallable> make(F func) {
+        return std::make_shared<InvokeCallable>(InvokeCallable{ std::move(func) });
+    }
+};
+
+template <typename... A> struct MakeCallable<ContextTypes (*)(ContextItems&, A...)> {
+    typedef ContextTypes (*Func)(ContextItems&, A...);
+
+    static std::shared_ptr<InvokeCallable> make(Func func) {
+        return std::make_shared<InvokeCallable>(
+            InvokeCallable{ [func](ContextItems& items, const std::vector<ContextTypes>& args) -> ContextTypes {
+                if (args.size() != sizeof...(A)) {
+                    throw RuntimeError("Native function expects " + std::to_string(sizeof...(A)) +
+                                       " argument(s), got " + std::to_string(args.size()));
+                }
+                return apply(func, items, args, std::index_sequence_for<A...>{});
+            } });
+    }
+
+  private:
+    template <size_t... I>
+    static ContextTypes apply(Func func, ContextItems& items, const std::vector<ContextTypes>& args,
+                              std::index_sequence<I...>) {
+        return func(items, args[I]...);
+    }
+};
+} // namespace detail
+
+template <typename F, typename>
+InvokeFunc::InvokeFunc(F func) : m_impl(detail::MakeCallable<std::decay_t<F>>::make(std::move(func))) {
+}
+
+inline ContextTypes call_native(const InvokeFunc& func, ContextItems& items, const std::vector<ContextTypes>& args) {
+    if (!func) {
+        throw RuntimeError("Call to an unbound native function");
+    }
+    return func.target()->func(items, args);
+}
 
 enum class ScopeType { None, If, Else, ElseIf, For };
 
@@ -183,7 +260,7 @@ struct RuntimeContext {
     bool skipUntilEnd = false;
 };
 
-typedef std::optional<std::string> (*IncludeFunc)(const std::string&);
+typedef std::function<std::optional<std::string>(const std::string&)> IncludeFunc;
 
 class Processor {
   public:
@@ -202,7 +279,7 @@ class Processor {
         return m_settings;
     }
     void bind_include_loader(IncludeFunc func){
-        m_include_loader = func;
+        m_include_loader = std::move(func);
     }
 
     template <typename T> void array_iterate(prism::ForNode& node, prism::ForContext& context) {
@@ -222,6 +299,6 @@ class Processor {
     std::stringstream m_output;
     std::string m_input;
     std::shared_ptr<prism::Node> m_root;
-    IncludeFunc m_include_loader = nullptr;
+    IncludeFunc m_include_loader;
 };
 } // namespace prism

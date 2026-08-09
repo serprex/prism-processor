@@ -1,6 +1,7 @@
 #pragma once
 
 #include <exception>
+#include <string>
 #include <utility>
 
 namespace prism {
@@ -18,13 +19,13 @@ class SyntaxError : public std::exception {
 
 class RuntimeError : public std::exception {
   public:
-    RuntimeError(const char* message) : m_message(message) {
+    RuntimeError(std::string message) : m_message(std::move(message)) {
     }
     const char* what() const noexcept override {
-        return m_message;
+        return m_message.c_str();
     }
 
   private:
-    const char* m_message;
+    std::string m_message;
 };
 } // namespace prism
